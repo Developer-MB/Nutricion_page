@@ -1,0 +1,6 @@
+{
+  "name": "NutriApp - Plataforma Clínica Nutricional",
+  "description": "Plataforma integral de nutrición clínica de precisión para seguimiento metabólico, composición corporal, expedientes de pacientes y planes alimentarios.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
