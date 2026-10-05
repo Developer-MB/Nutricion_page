@@ -3,7 +3,25 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { onAuthStateChanged, signInWithPopup, signOut, User } from 'firebase/auth';
+import {
+  collection,
+  doc,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
+} from 'firebase/firestore';
+import {
+  auth,
+  db,
+  googleAuthProvider,
+  handleFirestoreError,
+  OperationType,
+} from './lib/firebase';
 import {
   Appointment,
   ASSETS,
@@ -40,6 +58,10 @@ export default function App() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
+  // Firebase Auth state
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+
   // New Patient Form State
   const [npName, setNpName] = useState('');
   const [npEmail, setNpEmail] = useState('');
@@ -54,6 +76,94 @@ export default function App() {
   const [ncTime, setNcTime] = useState('10:30 AM');
   const [ncType, setNcType] = useState('Seguimiento');
 
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+      setIsAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Firestore real-time synchronization when authenticated
+  useEffect(() => {
+    if (!isAuthReady || !currentUser || !currentUser.emailVerified) return;
+
+    const patientsQuery = query(
+      collection(db, 'patients'),
+      where('ownerId', '==', currentUser.uid)
+    );
+
+    const unsubPatients = onSnapshot(
+      patientsQuery,
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const remotePatients = snapshot.docs.map((docSnap) => {
+            const data = docSnap.data();
+            const fallback =
+              INITIAL_PATIENTS.find((p) => p.id === docSnap.id) || INITIAL_PATIENTS[0];
+            return {
+              ...fallback,
+              ...data,
+              id: docSnap.id,
+            } as Patient;
+          });
+          setPatients((prev) => {
+            const remoteIds = new Set(remotePatients.map((r) => r.id));
+            const remainingInitial = prev.filter((p) => !remoteIds.has(p.id));
+            return [...remotePatients, ...remainingInitial];
+          });
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'patients');
+      }
+    );
+
+    const appointmentsQuery = query(
+      collection(db, 'appointments'),
+      where('ownerId', '==', currentUser.uid)
+    );
+
+    const unsubAppointments = onSnapshot(
+      appointmentsQuery,
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const remoteApts = snapshot.docs.map((docSnap) => {
+            const data = docSnap.data();
+            return {
+              id: docSnap.id,
+              date: data.date,
+              time: data.time,
+              patientId: data.patientId,
+              patientName: data.patientName,
+              initials: data.initials,
+              folio: data.folio,
+              type: data.type,
+              protocol: data.protocol,
+              protocolColor: data.protocolColor,
+              status: data.status,
+              avatarBg: 'bg-primary-fixed',
+              avatarText: 'text-on-primary-fixed',
+            } as Appointment;
+          });
+          setAppointments((prev) => {
+            const remoteIds = new Set(remoteApts.map((r) => r.id));
+            const remaining = prev.filter((a) => !remoteIds.has(a.id));
+            return [...remoteApts, ...remaining];
+          });
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'appointments');
+      }
+    );
+
+    return () => {
+      unsubPatients();
+      unsubAppointments();
+    };
+  }, [isAuthReady, currentUser]);
+
   const selectedPatient = patients.find((p) => p.id === selectedPatientId) || patients[0];
 
   const handleSelectPatient = (patientId: string) => {
@@ -61,7 +171,44 @@ export default function App() {
     setActiveScreen('expediente');
   };
 
-  const handleCreatePatient = (e: React.FormEvent) => {
+  // Helper to ensure a patient exists in Firestore under strict blueprint schema before updating/referencing
+  const ensurePatientInFirestore = async (patient: Patient, uid: string) => {
+    const cleanId = patient.id.replace(/[^a-zA-Z0-9_-]/g, '');
+    const docRef = doc(db, 'patients', cleanId);
+    const payload = {
+      ownerId: uid.slice(0, 128),
+      name: patient.name.slice(0, 120),
+      initials: patient.initials.slice(0, 4),
+      folio: patient.folio.slice(0, 40),
+      expediente: patient.expediente.slice(0, 60),
+      age: Math.min(130, Math.max(0, Number(patient.age) || 30)),
+      gender: patient.gender === 'Masculino' ? 'Masculino' : 'Femenino',
+      genderShort: patient.gender === 'Masculino' ? 'Masc.' : 'Fem.',
+      phone: (patient.phone || '+52 55 0000 0000').slice(0, 40),
+      email: (patient.email || 'paciente@nutriapp.com').slice(0, 120),
+      condition: (patient.condition || 'Sano').slice(0, 80),
+      conditionCategory: ['sano', 'diabetes', 'hipertension'].includes(patient.conditionCategory)
+        ? patient.conditionCategory
+        : 'sano',
+      status:
+        patient.status === 'En seguimiento' ? 'En seguimiento' : 'Activo en tratamiento',
+      compliance: Math.min(100, Math.max(0, Number(patient.compliance) || 85)),
+      currentWeight: Math.min(400, Math.max(1, Number(patient.currentWeight) || 70)),
+      height: Math.min(3, Math.max(0.5, Number(patient.height) || 1.7)),
+      bmi: Math.min(100, Math.max(5, Number(patient.bmi) || 24.2)),
+      bodyFat: Math.min(80, Math.max(1, Number(patient.bodyFat) || 20)),
+      clinicalNotes: (patient.clinicalNotes || '').slice(0, 2000),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+    try {
+      await setDoc(docRef, payload);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `patients/${cleanId}`);
+    }
+  };
+
+  const handleCreatePatient = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!npName.trim()) return;
     const parts = npName.trim().split(' ');
@@ -70,17 +217,18 @@ export default function App() {
         ? (parts[0][0] + parts[1][0]).toUpperCase()
         : npName.slice(0, 2).toUpperCase();
 
+    const newId = 'p_' + Date.now();
     const newPatient: Patient = {
-      id: 'p-' + Date.now(),
-      name: npName.trim(),
-      initials,
+      id: newId,
+      name: npName.trim().slice(0, 120),
+      initials: initials.slice(0, 4),
       folio: `#NUT-2024-${Math.floor(100 + Math.random() * 899)}`,
       expediente: `Expediente #NP-2024-${Math.floor(100 + Math.random() * 899)}`,
       age: Number(npAge) || 30,
       gender: npGender,
       genderShort: npGender === 'Masculino' ? 'Masc.' : 'Fem.',
-      phone: npPhone || '+52 55 4000 1234',
-      email: npEmail || 'paciente@nutriapp.com',
+      phone: (npPhone || '+52 55 4000 1234').slice(0, 40),
+      email: (npEmail || 'paciente@nutriapp.com').slice(0, 120),
       condition:
         npCondition === 'sano'
           ? 'Sano'
@@ -110,16 +258,15 @@ export default function App() {
         { month: 'Abr', weight: 70.8, glucose: 97 },
         { month: 'May', weight: 70.0, glucose: 95 },
       ],
-      labs: [
-        { id: 'l-new', date: '10/10/2024', glucose: 95, hba1c: 5.4, status: 'Óptimo' },
-      ],
+      labs: [{ id: 'l-new', date: '10/10/2024', glucose: 95, hba1c: 5.4, status: 'Óptimo' }],
       nextLabDate: '15 Dic 2024',
       dietPlanTitle: 'Normocalórico · 1,800 kcal/día',
       dietPlanStage: 'Semana 1 / Fase 1',
       mealsRecorded: '25 / 28 registradas',
       hydrationCompliance: '92% cumplido',
       physicalActivity: '4 días / semana',
-      clinicalNotes: 'Expediente clínico inicial aperturado. Se asigna plan alimentario personalizado.',
+      clinicalNotes:
+        'Expediente clínico inicial aperturado. Se asigna plan alimentario personalizado.',
       avatarColorClass: 'bg-primary-fixed text-on-primary-fixed',
     };
 
@@ -129,21 +276,26 @@ export default function App() {
     setNpName('');
     setNpEmail('');
     setActiveScreen('expediente');
+
+    if (currentUser && currentUser.emailVerified) {
+      await ensurePatientInFirestore(newPatient, currentUser.uid);
+    }
   };
 
-  const handleCreateConsult = (e: React.FormEvent) => {
+  const handleCreateConsult = async (e: React.FormEvent) => {
     e.preventDefault();
     const target = patients.find((p) => p.id === ncPatientId) || patients[0];
+    const aptId = 'apt_' + Date.now();
     const newApt: Appointment = {
-      id: 'apt-' + Date.now(),
-      date: ncDate,
-      time: ncTime,
+      id: aptId,
+      date: ncDate.slice(0, 30),
+      time: ncTime.slice(0, 20),
       patientId: target.id,
-      patientName: target.name,
-      initials: target.initials,
-      folio: `Folio: ${target.folio}`,
-      type: ncType,
-      protocol: target.condition,
+      patientName: target.name.slice(0, 120),
+      initials: target.initials.slice(0, 4),
+      folio: `Folio: ${target.folio}`.slice(0, 60),
+      type: ncType.slice(0, 60),
+      protocol: target.condition.slice(0, 80),
       protocolColor: target.conditionCategory === 'diabetes' ? 'red' : 'green',
       status: 'Confirmada',
       avatarBg: 'bg-primary-fixed',
@@ -151,19 +303,64 @@ export default function App() {
     };
     setAppointments([newApt, ...appointments]);
     setShowNewConsultModal(false);
+
+    if (currentUser && currentUser.emailVerified) {
+      await ensurePatientInFirestore(target, currentUser.uid);
+      try {
+        await setDoc(doc(db, 'appointments', aptId), {
+          ownerId: currentUser.uid,
+          patientId: target.id.replace(/[^a-zA-Z0-9_-]/g, ''),
+          patientName: newApt.patientName,
+          initials: newApt.initials,
+          folio: newApt.folio,
+          date: newApt.date,
+          time: newApt.time,
+          type: newApt.type,
+          protocol: newApt.protocol,
+          protocolColor: newApt.protocolColor,
+          status: newApt.status,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.CREATE, `appointments/${aptId}`);
+      }
+    }
   };
 
-  const handleUpdateNotes = (patientId: string, notes: string) => {
+  const handleUpdateNotes = async (patientId: string, notes: string) => {
+    const sanitizedNotes = notes.slice(0, 2000);
     setPatients((prev) =>
-      prev.map((p) => (p.id === patientId ? { ...p, clinicalNotes: notes } : p))
+      prev.map((p) => (p.id === patientId ? { ...p, clinicalNotes: sanitizedNotes } : p))
     );
+
+    if (currentUser && currentUser.emailVerified) {
+      const cleanId = patientId.replace(/[^a-zA-Z0-9_-]/g, '');
+      try {
+        await updateDoc(doc(db, 'patients', cleanId), {
+          clinicalNotes: sanitizedNotes,
+          updatedAt: serverTimestamp(),
+        });
+      } catch {
+        const target = patients.find((p) => p.id === patientId);
+        if (target) {
+          await ensurePatientInFirestore(
+            { ...target, clinicalNotes: sanitizedNotes },
+            currentUser.uid
+          );
+        }
+      }
+    }
   };
 
-  const handleAddMeasurement = (patientId: string, weight: number, fat: number) => {
+  const handleAddMeasurement = async (patientId: string, weight: number, fat: number) => {
+    const target = patients.find((p) => p.id === patientId);
+    if (!target) return;
+    const bmi = Number((weight / (target.height * target.height)).toFixed(1));
+
     setPatients((prev) =>
       prev.map((p) => {
         if (p.id !== patientId) return p;
-        const bmi = Number((weight / (p.height * p.height)).toFixed(1));
         return {
           ...p,
           currentWeight: weight,
@@ -172,6 +369,32 @@ export default function App() {
         };
       })
     );
+
+    if (currentUser && currentUser.emailVerified) {
+      const cleanId = patientId.replace(/[^a-zA-Z0-9_-]/g, '');
+      try {
+        await updateDoc(doc(db, 'patients', cleanId), {
+          currentWeight: weight,
+          bodyFat: fat,
+          bmi,
+          updatedAt: serverTimestamp(),
+        });
+      } catch {
+        await ensurePatientInFirestore(
+          { ...target, currentWeight: weight, bodyFat: fat, bmi },
+          currentUser.uid
+        );
+      }
+    }
+  };
+
+  const handleGoogleSignInHeader = async () => {
+    try {
+      await signInWithPopup(auth, googleAuthProvider);
+      setShowProfileMenu(false);
+    } catch (err) {
+      console.error('Google Sign-In error:', err);
+    }
   };
 
   // Global quick switcher bar so user can inspect all 4 reference screens effortlessly
@@ -239,7 +462,7 @@ export default function App() {
 
   return (
     <div className="bg-background font-body-md text-on-surface antialiased min-h-screen">
-      {/* Persistent Left Sidebar matching HTML exactly */}
+      {/* Persistent Left Sidebar matching HTML */}
       <aside className="fixed left-0 top-0 h-screen w-64 bg-inverse-surface z-50 flex flex-col justify-between select-none shadow-[0_1px_8px_rgba(0,0,0,0.04)]">
         <div className="flex flex-col flex-1 overflow-y-auto">
           <div
@@ -329,7 +552,6 @@ export default function App() {
               )}
             </div>
 
-            {/* Instant Search Dropdown */}
             {searchResults.length > 0 && (
               <div className="absolute top-12 left-0 w-full bg-surface-container-lowest rounded-xl shadow-lg border border-surface-container overflow-hidden z-50">
                 {searchResults.map((p) => (
@@ -425,11 +647,13 @@ export default function App() {
                 <img
                   alt="Dra. Ana López"
                   className="w-8 h-8 rounded-full object-cover"
-                  src={ASSETS.doctorProfile}
+                  src={currentUser?.photoURL || ASSETS.doctorProfile}
                   referrerPolicy="no-referrer"
                 />
                 <div className="flex flex-col text-left">
-                  <span className="font-label-lg text-label-lg text-on-surface">Dra. Ana López</span>
+                  <span className="font-label-lg text-label-lg text-on-surface">
+                    {currentUser?.displayName || 'Dra. Ana López'}
+                  </span>
                   <span className="font-label-sm text-label-sm text-secondary">
                     Nutrióloga Clínica
                   </span>
@@ -440,7 +664,21 @@ export default function App() {
               </div>
 
               {showProfileMenu && (
-                <div className="absolute right-0 mt-2 w-56 bg-surface-container-lowest rounded-xl shadow-xl border border-surface-container py-1.5 z-50">
+                <div className="absolute right-0 mt-2 w-60 bg-surface-container-lowest rounded-xl shadow-xl border border-surface-container py-1.5 z-50">
+                  {!currentUser ? (
+                    <button
+                      onClick={handleGoogleSignInHeader}
+                      className="w-full px-space-md py-2 text-left font-body-sm text-body-sm text-primary font-semibold hover:bg-surface-container-low flex items-center gap-2 cursor-pointer"
+                      type="button"
+                    >
+                      <span className="material-symbols-outlined text-base">account_circle</span>
+                      Conectar cuenta Google
+                    </button>
+                  ) : (
+                    <div className="px-space-md py-1.5 text-label-sm text-tertiary border-b border-surface-container-low">
+                      Sincronizado: {currentUser.email}
+                    </div>
+                  )}
                   <button
                     onClick={() => {
                       setActiveScreen('configuracion');
@@ -467,7 +705,10 @@ export default function App() {
                   </button>
                   <div className="my-1 border-t border-surface-container-low"></div>
                   <button
-                    onClick={() => {
+                    onClick={async () => {
+                      if (currentUser) {
+                        await signOut(auth);
+                      }
                       setShowProfileMenu(false);
                       setActiveScreen('login');
                     }}
@@ -535,7 +776,7 @@ export default function App() {
         </main>
       </div>
 
-      {/* Modal: Registro de Nuevo Paciente (from reference HTML) */}
+      {/* Modal: Registro de Nuevo Paciente */}
       {showNewPatientModal && (
         <div className="fixed inset-0 bg-inverse-surface/40 backdrop-blur-xs z-50 flex items-center justify-center p-space-md">
           <div className="bg-surface-container-lowest rounded-xl shadow-xl w-full max-w-xl overflow-hidden">
@@ -572,6 +813,7 @@ export default function App() {
                     className="px-space-md py-space-sm rounded-lg bg-surface-container-low text-on-surface border-0 outline-none focus:ring-2 focus:ring-primary text-body-md"
                     placeholder="Ej. Mariana Sánchez Gómez"
                     required
+                    maxLength={120}
                     type="text"
                     value={npName}
                     onChange={(e) => setNpName(e.target.value)}
@@ -585,6 +827,7 @@ export default function App() {
                     className="px-space-md py-space-sm rounded-lg bg-surface-container-low text-on-surface border-0 outline-none focus:ring-2 focus:ring-primary text-body-md"
                     placeholder="mariana.sanchez@ejemplo.com"
                     required
+                    maxLength={120}
                     type="email"
                     value={npEmail}
                     onChange={(e) => setNpEmail(e.target.value)}
@@ -628,6 +871,7 @@ export default function App() {
                   <input
                     className="px-space-md py-space-sm rounded-lg bg-surface-container-low text-on-surface border-0 outline-none focus:ring-2 focus:ring-primary text-body-md"
                     placeholder="+52 55..."
+                    maxLength={40}
                     type="tel"
                     value={npPhone}
                     onChange={(e) => setNpPhone(e.target.value)}
@@ -748,6 +992,7 @@ export default function App() {
                   </label>
                   <input
                     type="text"
+                    maxLength={30}
                     value={ncDate}
                     onChange={(e) => setNcDate(e.target.value)}
                     className="w-full px-space-md py-space-sm rounded-lg bg-surface-container-low text-on-surface outline-none"
@@ -759,6 +1004,7 @@ export default function App() {
                   </label>
                   <input
                     type="text"
+                    maxLength={20}
                     value={ncTime}
                     onChange={(e) => setNcTime(e.target.value)}
                     className="w-full px-space-md py-space-sm rounded-lg bg-surface-container-low text-on-surface outline-none"

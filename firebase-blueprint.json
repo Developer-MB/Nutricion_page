@@ -1,0 +1,224 @@
+{
+  "entities": {
+    "Patient": {
+      "title": "Patient",
+      "description": "Clinical nutrition patient dossier managed by a nutritionist.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the nutritionist who owns this dossier.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "description": "Full name of the patient.",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "initials": {
+          "type": "string",
+          "description": "Two-letter initials.",
+          "minLength": 1,
+          "maxLength": 4
+        },
+        "folio": {
+          "type": "string",
+          "description": "Clinical folio code.",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "expediente": {
+          "type": "string",
+          "description": "Expediente identifier label.",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "age": {
+          "type": "number",
+          "description": "Patient age in years."
+        },
+        "gender": {
+          "type": "string",
+          "enum": ["Masculino", "Femenino"],
+          "maxLength": 20
+        },
+        "genderShort": {
+          "type": "string",
+          "enum": ["Masc.", "Fem."],
+          "maxLength": 10
+        },
+        "phone": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 120
+        },
+        "condition": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "conditionCategory": {
+          "type": "string",
+          "enum": ["sano", "diabetes", "hipertension"],
+          "maxLength": 20
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Activo en tratamiento", "En seguimiento"],
+          "maxLength": 40
+        },
+        "compliance": {
+          "type": "number",
+          "description": "Adherence score percentage (0 to 100)."
+        },
+        "currentWeight": {
+          "type": "number",
+          "description": "Current weight in kg."
+        },
+        "height": {
+          "type": "number",
+          "description": "Height in meters."
+        },
+        "bmi": {
+          "type": "number",
+          "description": "Calculated BMI."
+        },
+        "bodyFat": {
+          "type": "number",
+          "description": "Body fat percentage."
+        },
+        "clinicalNotes": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "name",
+        "initials",
+        "folio",
+        "expediente",
+        "age",
+        "gender",
+        "genderShort",
+        "phone",
+        "email",
+        "condition",
+        "conditionCategory",
+        "status",
+        "compliance",
+        "currentWeight",
+        "height",
+        "bmi",
+        "bodyFat",
+        "clinicalNotes",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Appointment": {
+      "title": "Appointment",
+      "description": "Scheduled clinical nutrition consultation.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the nutritionist.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "patientId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "patientName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "initials": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4
+        },
+        "folio": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "date": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "time": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "type": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "protocol": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "protocolColor": {
+          "type": "string",
+          "enum": ["red", "green", "teal"],
+          "maxLength": 10
+        },
+        "status": {
+          "type": "string",
+          "enum": ["En espera", "Confirmada", "Agendada"],
+          "maxLength": 20
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "patientId",
+        "patientName",
+        "initials",
+        "folio",
+        "date",
+        "time",
+        "type",
+        "protocol",
+        "protocolColor",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/patients/{patientId}": {
+      "schema": { "$ref": "#/entities/Patient" },
+      "description": "Clinical patient records owned by the authenticated specialist."
+    },
+    "/appointments/{appointmentId}": {
+      "schema": { "$ref": "#/entities/Appointment" },
+      "description": "Clinical appointments owned by the authenticated specialist."
+    }
+  }
+}

@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { signInWithPopup } from 'firebase/auth';
+import { auth, googleAuthProvider } from '../lib/firebase';
 import { ASSETS } from '../data/mockData';
 
 interface LoginScreenProps {
@@ -30,6 +32,28 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     }, 800);
   };
 
+  const handleGoogleSignIn = async () => {
+    setIsSubmitting(true);
+    setAuthNotice('Conectando con Google Cloud & Firebase Authentication...');
+    setAuthSuccess(false);
+    try {
+      await signInWithPopup(auth, googleAuthProvider);
+      setAuthSuccess(true);
+      setAuthNotice('Sesión médica iniciada con Google. Sincronizando Firestore...');
+      setTimeout(() => {
+        setIsSubmitting(false);
+        onLoginSuccess();
+      }, 500);
+    } catch (err: any) {
+      setIsSubmitting(false);
+      setAuthNotice(
+        err?.message
+          ? `Aviso de autenticación: ${err.message}`
+          : 'No se completó el inicio de sesión con Google.'
+      );
+    }
+  };
+
   return (
     <div className="bg-background font-body-md text-on-surface antialiased min-h-screen flex items-center justify-center w-full">
       <main className="w-full">
@@ -44,7 +68,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
             <div className="relative w-full max-w-4xl bg-surface-container-lowest rounded-xl shadow-xl flex flex-col md:flex-row overflow-hidden z-10">
               {/* Left Panel: Editorial Clinical Context */}
               <div className="relative hidden md:flex md:w-5/12 bg-primary flex-col justify-between p-8 text-on-primary overflow-hidden">
-                {/* Subtle medical wave / leaf background overlay */}
                 <div className="absolute inset-0 opacity-10 pointer-events-none">
                   <svg className="w-full h-full object-cover" fill="none" viewBox="0 0 400 600" xmlns="http://www.w3.org/2000/svg">
                     <path d="M-50 150 C 100 80, 200 250, 450 120" stroke="currentColor" strokeLinecap="round" strokeWidth="24"></path>
@@ -66,7 +89,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                   </p>
                 </div>
 
-                {/* Live KPI Snapshot for reassurance */}
                 <div className="relative z-10 space-y-3 pt-6">
                   <div className="p-3.5 rounded-lg bg-on-primary/10 backdrop-blur-md flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full bg-on-primary/20 flex items-center justify-center shrink-0">
@@ -87,7 +109,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
               {/* Right Panel: Login Interface */}
               <div className="w-full md:w-7/12 p-6 sm:p-10 md:p-12 flex flex-col justify-between">
                 <div>
-                  {/* NutriApp Header Logo Area */}
                   <div className="flex flex-col items-center text-center">
                     <div className="w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center mb-2">
                       <img
@@ -109,8 +130,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                   </div>
 
                   {/* Login Form */}
-                  <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
-                    {/* Email Input Field */}
+                  <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
                     <div className="space-y-1.5 text-left">
                       <label className="block font-label-md text-label-md text-on-surface" htmlFor="email">
                         Correo electrónico
@@ -132,7 +152,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                       </div>
                     </div>
 
-                    {/* Password Input Field */}
                     <div className="space-y-1.5 text-left">
                       <label className="block font-label-md text-label-md text-on-surface" htmlFor="password">
                         Contraseña
@@ -164,7 +183,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                       </div>
                     </div>
 
-                    {/* Checkbox & Forgot Password Link */}
                     <div className="flex items-center justify-between pt-1">
                       <label className="flex items-center gap-2 cursor-pointer select-none">
                         <input
@@ -188,7 +206,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                       </button>
                     </div>
 
-                    {/* Primary Action Button */}
                     <button
                       disabled={isSubmitting}
                       className={`w-full mt-2 py-3 px-6 rounded-lg bg-primary-container hover:bg-primary text-on-primary font-headline-sm text-headline-sm tracking-wide shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center gap-2 group cursor-pointer ${
@@ -210,9 +227,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                         </>
                       )}
                     </button>
+
+                    <button
+                      type="button"
+                      onClick={handleGoogleSignIn}
+                      className="w-full py-2.5 px-6 rounded-lg bg-surface-container-low hover:bg-surface-container text-on-surface font-label-lg text-label-lg transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-primary text-lg">account_circle</span>
+                      <span>Continuar con Google (Sincronización Firebase)</span>
+                    </button>
                   </form>
 
-                  {/* Status Message for UX */}
                   {authNotice && (
                     <div
                       className={`mt-4 p-3 rounded-lg font-body-sm text-body-sm text-center transition-colors ${
@@ -226,8 +251,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                   )}
                 </div>
 
-                {/* Security Badge & Footer Compliance */}
-                <div className="mt-8 pt-6">
+                <div className="mt-6 pt-4">
                   <div className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-surface-container text-secondary text-center">
                     <span className="material-symbols-outlined text-primary text-base shrink-0 icon-filled">
                       verified

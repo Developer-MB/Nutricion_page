@@ -1,0 +1,151 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global Primitives
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Patient Validation Blueprint
+    function isValidPatient(data) {
+      return data.keys().hasAll([
+        'ownerId', 'name', 'initials', 'folio', 'expediente',
+        'age', 'gender', 'genderShort', 'phone', 'email',
+        'condition', 'conditionCategory', 'status', 'compliance',
+        'currentWeight', 'height', 'bmi', 'bodyFat', 'clinicalNotes',
+        'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'ownerId', 'name', 'initials', 'folio', 'expediente',
+        'age', 'gender', 'genderShort', 'phone', 'email',
+        'condition', 'conditionCategory', 'status', 'compliance',
+        'currentWeight', 'height', 'bmi', 'bodyFat', 'clinicalNotes',
+        'createdAt', 'updatedAt'
+      ]) &&
+      data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.ownerId == request.auth.uid &&
+      data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+      data.initials is string && data.initials.size() >= 1 && data.initials.size() <= 4 &&
+      data.folio is string && data.folio.size() >= 1 && data.folio.size() <= 40 &&
+      data.expediente is string && data.expediente.size() >= 1 && data.expediente.size() <= 60 &&
+      (data.age is int || data.age is float) && data.age >= 0 && data.age <= 130 &&
+      data.gender is string && data.gender.size() <= 20 && (data.gender == 'Masculino' || data.gender == 'Femenino') &&
+      data.genderShort is string && data.genderShort.size() <= 10 && (data.genderShort == 'Masc.' || data.genderShort == 'Fem.') &&
+      data.phone is string && data.phone.size() <= 40 &&
+      data.email is string && data.email.size() <= 120 &&
+      data.condition is string && data.condition.size() <= 80 &&
+      data.conditionCategory is string && data.conditionCategory.size() <= 20 && (data.conditionCategory == 'sano' || data.conditionCategory == 'diabetes' || data.conditionCategory == 'hipertension') &&
+      data.status is string && data.status.size() <= 40 && (data.status == 'Activo en tratamiento' || data.status == 'En seguimiento') &&
+      (data.compliance is int || data.compliance is float) && data.compliance >= 0 && data.compliance <= 100 &&
+      (data.currentWeight is int || data.currentWeight is float) && data.currentWeight > 0 && data.currentWeight <= 400 &&
+      (data.height is int || data.height is float) && data.height > 0 && data.height <= 3 &&
+      (data.bmi is int || data.bmi is float) && data.bmi > 0 && data.bmi <= 100 &&
+      (data.bodyFat is int || data.bodyFat is float) && data.bodyFat >= 0 && data.bodyFat <= 80 &&
+      data.clinicalNotes is string && data.clinicalNotes.size() <= 2000 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    // Appointment Validation Blueprint
+    function isValidAppointment(data) {
+      return data.keys().hasAll([
+        'ownerId', 'patientId', 'patientName', 'initials', 'folio',
+        'date', 'time', 'type', 'protocol', 'protocolColor', 'status',
+        'createdAt', 'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'ownerId', 'patientId', 'patientName', 'initials', 'folio',
+        'date', 'time', 'type', 'protocol', 'protocolColor', 'status',
+        'createdAt', 'updatedAt'
+      ]) &&
+      data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.ownerId == request.auth.uid &&
+      data.patientId is string && data.patientId.size() >= 1 && data.patientId.size() <= 128 && data.patientId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.patientName is string && data.patientName.size() >= 1 && data.patientName.size() <= 120 &&
+      data.initials is string && data.initials.size() >= 1 && data.initials.size() <= 4 &&
+      data.folio is string && data.folio.size() <= 60 &&
+      data.date is string && data.date.size() <= 30 &&
+      data.time is string && data.time.size() <= 20 &&
+      data.type is string && data.type.size() <= 60 &&
+      data.protocol is string && data.protocol.size() <= 80 &&
+      data.protocolColor is string && data.protocolColor.size() <= 10 && (data.protocolColor == 'red' || data.protocolColor == 'green' || data.protocolColor == 'teal') &&
+      data.status is string && data.status.size() <= 20 && (data.status == 'En espera' || data.status == 'Confirmada' || data.status == 'Agendada') &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    match /patients/{patientId} {
+      allow get: if isSignedIn() && isValidId(patientId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+        isValidId(patientId) &&
+        isValidPatient(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isSignedIn() &&
+        isValidId(patientId) &&
+        isValidPatient(incoming()) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          // Action 1: Update Clinical Notes
+          incoming().diff(existing()).affectedKeys().hasOnly(['clinicalNotes', 'updatedAt']) ||
+          // Action 2: Update Anthropometric Measurements
+          incoming().diff(existing()).affectedKeys().hasOnly(['currentWeight', 'bodyFat', 'bmi', 'updatedAt'])
+        );
+
+      allow delete: if isSignedIn() && isValidId(patientId) && existing().ownerId == request.auth.uid;
+    }
+
+    match /appointments/{appointmentId} {
+      allow get: if isSignedIn() && isValidId(appointmentId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+        isValidId(appointmentId) &&
+        isValidAppointment(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/patients/$(incoming().patientId)) &&
+        get(/databases/$(database)/documents/patients/$(incoming().patientId)).data.ownerId == request.auth.uid;
+
+      allow update: if isSignedIn() &&
+        isValidId(appointmentId) &&
+        isValidAppointment(incoming()) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().patientId == existing().patientId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          // Action: Update Appointment Status (Non-terminal transition)
+          existing().status != 'Confirmada' &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+        );
+
+      allow delete: if isSignedIn() && isValidId(appointmentId) && existing().ownerId == request.auth.uid;
+    }
+  }
+}
